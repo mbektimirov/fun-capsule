@@ -47,6 +47,7 @@ module.exports = {
     'standard/computed-property-even-spacing': 0,
     'generator-star-spacing': ['error', { before: false, after: true }],
     camelcase: 0,
+    'react/prop-types': 0,
   },
   env: {
     browser: true,
