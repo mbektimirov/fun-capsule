@@ -4,12 +4,14 @@
 }
 
 .simulator {
-  display: flex;
-  padding: 70px;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 70px;
 
   .user {
-    top: 65%;
+    top: 57%;
     left: 0;
     position: absolute;
     transform: translate(-50%, -20%);
@@ -68,7 +70,7 @@
       }
 
       &.active {
-        border: 2px dashed #2d9baf;
+        border: 1px dashed #2d9baf;
       }
 
       .zone-number {
@@ -86,7 +88,7 @@
     }
 
     &.active {
-      border: 2px solid #2d9baf;
+      border: 1px solid #2d9baf;
       background: #b7fab73d;
     }
 
@@ -99,6 +101,35 @@
       height: 50px;
       border: 1px solid gray;
       border-radius: 50%;
+    }
+  }
+
+  .tv-rail {
+    display: flex;
+    align-items: center;
+    width: 67%;
+    height: 5px;
+    margin-top: 40px;
+    background-image: linear-gradient(
+      48deg,
+      #ffffff 30%,
+      #00559e 30%,
+      #00559e 50%,
+      #ffffff 50%,
+      #ffffff 80%,
+      #00559e 80%,
+      #00559e 100%
+    );
+    background-size: 33.64px 37.36px;
+    border: 1px solid;
+
+    .tv-stand {
+      width: 100px;
+      height: 20px;
+      background: red;
+      position: absolute;
+      transform: translateX(-50%);
+      transition: all 2.5s;
     }
   }
 }
