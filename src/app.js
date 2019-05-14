@@ -20,12 +20,13 @@ import EventEmitter from 'events';
 
 const actions = {
   INIT: 'INIT',
-  ZONE_1_TRIGGER: 'ZONE_1_TRIGGER',
-  ZONE_2_TRIGGER: 'ZONE_2_TRIGGER',
-  ZONE_3_TRIGGER: 'ZONE_3_TRIGGER',
-  TV_STAND_MOVE_TO: 'TV_STAND_MOVE_TO',
-  TV_STAND_FINISHED_MOVE: 'TV_STAND_FINISHED_MOVE',
-  ZONE_PROCESSING: 'ZONE_PROCESSING',
+  SENSOR_TRIGGER: 'SENSOR_TRIGGER',
+  ZONE_ACTIVATED: 'ZONE_ACTIVATED',
+  // TV_STAND_MOVE_TO: 'TV_STAND_MOVE_TO',
+  TV_STAND_MOVE_FINISHED: 'TV_STAND_MOVE_FINISHED',
+  VIDEO_START: 'VIDEO_START',
+  VIDEO_FINISHED: 'VIDEO_FINISHED',
+  ZONE_FINISHED: 'ZONE_FINISHED',
   FINISH: 'FINISH',
 };
 
@@ -45,12 +46,53 @@ const createSagaIO = (emitter, getStateResolve) => {
   };
 };
 
+const matchSensor = number => {
+  return action => action.type === actions.SENSOR_TRIGGER && action.sensorNumber === number;
+};
+
+function* zone1Task() {
+  yield take(matchSensor(1));
+  yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 1 });
+  yield take(actions.TV_STAND_MOVE_FINISHED);
+  yield put({ type: actions.VIDEO_START });
+  yield take(actions.VIDEO_FINISHED);
+  yield put({ type: actions.ZONE_FINISHED, zoneNumber: 1 });
+}
+
+function* zone2Task() {
+  yield take(matchSensor(2));
+  yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 2 });
+  yield take(actions.TV_STAND_MOVE_FINISHED);
+  yield put({ type: actions.VIDEO_START });
+  yield take(actions.VIDEO_FINISHED);
+  yield put({ type: actions.ZONE_FINISHED, zoneNumber: 2 });
+}
+
+function* zone3Task() {
+  yield take(matchSensor(3));
+  yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 3 });
+  yield take(actions.TV_STAND_MOVE_FINISHED);
+  yield put({ type: actions.VIDEO_START });
+  yield take(actions.VIDEO_FINISHED);
+  yield put({ type: actions.ZONE_FINISHED, zoneNumber: 3 });
+}
+
 function* simulatorSaga() {
   try {
     while (true) {
-      yield take(actions.ZONE_1_TRIGGER);
+      yield fork(zone1Task);
+      yield take(actions.ZONE_FINISHED);
 
-      console.log(actions.ZONE_1_TRIGGER);
+      yield fork(zone2Task);
+      yield take(actions.ZONE_FINISHED);
+
+      yield fork(zone3Task);
+      yield take(actions.ZONE_FINISHED);
+
+      // const [zone1Finished, zone1Interrupted] = yield race([
+      //   take(actions.ZONE_FINISHED),
+      //   take(actions.SENSOR_TRIGGER),
+      // ]);
     }
   } finally {
     if (yield cancelled()) {
@@ -60,7 +102,7 @@ function* simulatorSaga() {
 
 runSaga(createSagaIO(emitter, () => state), simulatorSaga);
 
-const Zone = ({ number, label, active, isMeta, onClick, onRender }) => {
+const Zone = ({ number, label, active, isMeta, isFinished, onClick, onRender }) => {
   let zoneRef;
 
   const getZonePosition = () => ({
@@ -81,52 +123,91 @@ const Zone = ({ number, label, active, isMeta, onClick, onRender }) => {
     onClick && onClick(getZonePosition());
   };
 
+  const cls = cx('zone', {
+    active,
+    meta: isMeta,
+    finished: isFinished,
+  });
+
   return (
-    <div className={cx('zone', { active, meta: isMeta })} onClick={click} ref={onRef}>
+    <div className={cls} onClick={click} ref={onRef}>
       <div className="zone-number">{number}</div>
     </div>
   );
 };
 
-const User = ({ zone }) => {
+const User = ({ zone, active }) => {
   const left = zone ? zone.left + zone.width / 2 : 0;
 
-  return <div className="user" style={{ left }} />;
+  return <div className={cx('user', { active })} style={{ left }} />;
 };
 
-const TvStand = ({ zone }) => {
+const TvStand = ({ zone, time, onMoveFinished }) => {
   const style = zone ? { left: zone.left + zone.width / 2 } : null;
 
   return (
     <div className="tv-rail">
-      <div
-        className="tv-stand"
-        style={style}
-        onTransitionEnd={e => console.log('tv transition end')}
-      />
+      <div className="tv-stand" style={style} onTransitionEnd={onMoveFinished.bind(null, zone)}>
+        <div className="video-timer">{time}</div>
+      </div>
     </div>
   );
 };
 
 export default class App extends React.Component {
-  state = {};
+  state = { finishedZones: {} };
   zones = {};
 
   constructor() {
     super();
 
+    let videoTickTimer;
+
     emitter.on('action', action => {
       switch (action.type) {
-        case actions.ZONE_1_TRIGGER:
-        case actions.ZONE_2_TRIGGER:
-        case actions.ZONE_3_TRIGGER:
-          this.setState({ userActiveZoneNumber: action.zone.number });
+        case actions.ZONE_ACTIVATED:
+          this.setState({
+            userActiveZoneNumber: action.zoneNumber,
+            tvStandActiveZoneNumber: action.zoneNumber,
+          });
+
+          if (this.state.tvStandActiveZoneNumber === action.zoneNumber) {
+            dispatch({ type: actions.TV_STAND_MOVE_FINISHED });
+          }
+
+          break;
+        case actions.VIDEO_START:
+          this.setState({ videoPlaying: true });
+
+          videoTickTimer = setInterval(() => {
+            if (this.state.videoTimeTick >= 5) {
+              dispatch({ type: actions.VIDEO_FINISHED });
+              this.setState({ videoTimeTick: 0, videoPlaying: false });
+              clearInterval(videoTickTimer);
+              return;
+            }
+
+            this.setState({ videoTimeTick: (this.state.videoTimeTick || 0) + 1 });
+          }, 1000);
+          break;
+        case actions.ZONE_FINISHED:
+          this.setState({
+            finishedZones: {
+              ...this.state.finishedZones,
+              [action.zoneNumber]: true,
+            },
+          });
+          break;
       }
     });
   }
 
-  onTriggerFire(number) {
-    console.log('Trigger', number);
+  onSensorTrigger(sensorNumber) {
+    dispatch({ type: actions.SENSOR_TRIGGER, sensorNumber });
+  }
+
+  onTvStandMoveFinished(zone) {
+    dispatch({ type: actions.TV_STAND_MOVE_FINISHED });
   }
 
   saveZone(zone) {
@@ -134,7 +215,7 @@ export default class App extends React.Component {
   }
 
   onZoneClick(zone) {
-    dispatch({ type: `ZONE_${zone.number}_TRIGGER`, zone });
+    // dispatch({ type: `ZONE_${zone.number}_TRIGGER`, zone });
   }
 
   componentDidMount() {
@@ -142,17 +223,27 @@ export default class App extends React.Component {
   }
 
   render() {
-    const { userActiveZoneNumber, tvStandActiveZoneNumber } = this.state;
-    const zones = [0, 1, 2, 3, 4].map(i => {
-      const isMetaZone = i === 0 || i === 4;
+    const {
+      userActiveZoneNumber,
+      tvStandActiveZoneNumber,
+      videoPlaying,
+      videoTimeTick,
+      finishedZones,
+    } = this.state;
+
+    const zones = [0, 1, 2, 3].map(i => {
+      const isMetaZone = i === 0;
 
       return (
         <React.Fragment key={i}>
-          {i !== 0 && <div className="laser-trigger" onClick={this.onTriggerFire.bind(this, i)} />}
+          {i !== 0 && (
+            <div className="laser-trigger" onClick={this.onSensorTrigger.bind(this, i)} />
+          )}
           <Zone
             number={i}
             active={userActiveZoneNumber === i}
             isMeta={isMetaZone}
+            isFinished={finishedZones[i]}
             onRender={this.saveZone.bind(this)}
             onClick={this.onZoneClick.bind(this)}
           />
@@ -161,17 +252,18 @@ export default class App extends React.Component {
     });
 
     const userActiveZone = this.zones[userActiveZoneNumber];
-    const tvStandActiveZone =
-      userActiveZone && userActiveZone.isMeta
-        ? this.zones[tvStandActiveZoneNumber]
-        : userActiveZone;
+    const tvStandActiveZone = this.zones[tvStandActiveZoneNumber];
 
     return (
       <div className="main">
         <div className="simulator">
-          <User zone={userActiveZone} />
+          <User zone={userActiveZone} active={videoPlaying} />
           <div className="zones">{zones}</div>
-          <TvStand zone={tvStandActiveZone} />
+          <TvStand
+            zone={tvStandActiveZone}
+            time={videoTimeTick}
+            onMoveFinished={this.onTvStandMoveFinished.bind(this)}
+          />
         </div>
       </div>
     );

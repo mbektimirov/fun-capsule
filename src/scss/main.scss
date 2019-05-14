@@ -23,6 +23,26 @@
     box-shadow: inset -25px -15px 40px rgba(0, 0, 0, 0.3);
     background-image: linear-gradient(-45deg, rgba(255, 255, 220, 0.3) 0%, transparent 100%);
     transition: all 150ms;
+    animation-duration: 1s;
+    animation-iteration-count: infinite;
+    transform-origin: bottom;
+
+    &.active {
+      animation-name: user-bouce;
+      animation-timing-function: ease;
+
+      @keyframes user-bouce {
+        0% {
+          transform: translate(-50%, 0);
+        }
+        50% {
+          transform: translate(-50%, -50px);
+        }
+        100% {
+          transform: translate(-50%, 0);
+        }
+      }
+    }
   }
 
   .laser-trigger {
@@ -78,6 +98,9 @@
       }
     }
 
+    &.finished {
+    }
+
     &:hover {
       border: 1px solid #2d9baf;
       transform: scale(1.03);
@@ -107,8 +130,9 @@
   .tv-rail {
     display: flex;
     align-items: center;
-    width: 67%;
+    width: 85%;
     height: 5px;
+    margin-left: 165px;
     margin-top: 40px;
     background-image: linear-gradient(
       48deg,
@@ -124,12 +148,19 @@
     border: 1px solid;
 
     .tv-stand {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
       width: 100px;
       height: 20px;
       background: red;
       position: absolute;
       transform: translateX(-50%);
-      transition: all 2.5s;
+      transition: left 2.5s;
+
+      &.video-timer {
+        background-color: white;
+      }
     }
   }
 }
