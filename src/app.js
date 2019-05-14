@@ -1,7 +1,7 @@
 import React from 'react';
 import cx from 'classnames';
-import { runSaga, stdChannel } from 'redux-saga';
-import { delay, call, cancelled, take, race, fork, put } from 'redux-saga/effects';
+import { runSaga, stdChannel, END } from 'redux-saga';
+import { delay, call, cancelled, take, race, fork, put, cancel } from 'redux-saga/effects';
 import EventEmitter from 'events';
 
 /*
@@ -22,6 +22,7 @@ const actions = {
   INIT: 'INIT',
   SENSOR_TRIGGER: 'SENSOR_TRIGGER',
   ZONE_ACTIVATED: 'ZONE_ACTIVATED',
+  ZONE_ACTIVATION_WARNING: 'ZONE_ACTIVATION_WARNING',
   // TV_STAND_MOVE_TO: 'TV_STAND_MOVE_TO',
   TV_STAND_MOVE_FINISHED: 'TV_STAND_MOVE_FINISHED',
   VIDEO_START: 'VIDEO_START',
@@ -46,9 +47,29 @@ const createSagaIO = (emitter, getStateResolve) => {
   };
 };
 
+// const sagaIO = createSagaIO(emitter, () => state);
+
 const matchSensor = number => {
   return action => action.type === actions.SENSOR_TRIGGER && action.sensorNumber === number;
 };
+
+function* activateZone(zoneNumber) {
+  for (let retries = 0; retries <= 1; retries++) {
+    const [sensorTriggered, timeout] = yield race([take(matchSensor(zoneNumber)), delay(5000)]);
+
+    if (sensorTriggered) {
+      return true;
+    }
+
+    if (timeout) {
+      yield put({ type: actions.ZONE_ACTIVATION_WARNING, zoneNumber });
+    }
+  }
+
+  yield put(END);
+
+  return false;
+}
 
 function* zone1Task() {
   yield take(matchSensor(1));
@@ -60,7 +81,12 @@ function* zone1Task() {
 }
 
 function* zone2Task() {
-  yield take(matchSensor(2));
+  const activated = yield call(activateZone, 2);
+
+  if (!activated) {
+    return;
+  }
+
   yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 2 });
   yield take(actions.TV_STAND_MOVE_FINISHED);
   yield put({ type: actions.VIDEO_START });
@@ -69,7 +95,12 @@ function* zone2Task() {
 }
 
 function* zone3Task() {
-  yield take(matchSensor(3));
+  const activated = yield call(activateZone, 3);
+
+  if (!activated) {
+    return;
+  }
+
   yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 3 });
   yield take(actions.TV_STAND_MOVE_FINISHED);
   yield put({ type: actions.VIDEO_START });
@@ -80,6 +111,7 @@ function* zone3Task() {
 function* simulatorSaga() {
   try {
     while (true) {
+      yield put({ type: actions.INIT });
       yield fork(zone1Task);
       yield take(actions.ZONE_FINISHED);
 
@@ -88,6 +120,8 @@ function* simulatorSaga() {
 
       yield fork(zone3Task);
       yield take(actions.ZONE_FINISHED);
+
+      yield put({ type: actions.FINISH });
 
       // const [zone1Finished, zone1Interrupted] = yield race([
       //   take(actions.ZONE_FINISHED),
@@ -99,8 +133,6 @@ function* simulatorSaga() {
     }
   }
 }
-
-runSaga(createSagaIO(emitter, () => state), simulatorSaga);
 
 const Zone = ({ number, label, active, isMeta, isFinished, onClick, onRender }) => {
   let zoneRef;
@@ -154,9 +186,26 @@ const TvStand = ({ zone, time, onMoveFinished }) => {
   );
 };
 
+const Logs = ({ logs = [] }) => {
+  return (
+    <div className="logs">
+      {logs.map(({ type, ...rest }, i) => (
+        <div key={i} className="log-entry">
+          <div>{type}</div>
+          <div>{Object.keys(rest).length > 0 && JSON.stringify(rest)}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export default class App extends React.Component {
-  state = { finishedZones: {} };
+  state = {
+    finishedZones: {},
+    logs: [],
+  };
   zones = {};
+  logs = [];
 
   constructor() {
     super();
@@ -164,7 +213,16 @@ export default class App extends React.Component {
     let videoTickTimer;
 
     emitter.on('action', action => {
+      this.logs.push(action);
+      this.setState({ logs: this.logs });
+
       switch (action.type) {
+        case actions.INIT:
+          this.setState({
+            userActiveZoneNumber: 0,
+            tvStandActiveZoneNumber: 1,
+          });
+          break;
         case actions.ZONE_ACTIVATED:
           this.setState({
             userActiveZoneNumber: action.zoneNumber,
@@ -218,8 +276,9 @@ export default class App extends React.Component {
     // dispatch({ type: `ZONE_${zone.number}_TRIGGER`, zone });
   }
 
-  componentDidMount() {
-    this.setState({ userActiveZoneNumber: 0, tvStandActiveZoneNumber: 1 });
+  start() {
+    dispatch(END);
+    runSaga(createSagaIO(emitter, () => state), simulatorSaga);
   }
 
   render() {
@@ -229,6 +288,7 @@ export default class App extends React.Component {
       videoPlaying,
       videoTimeTick,
       finishedZones,
+      logs,
     } = this.state;
 
     const zones = [0, 1, 2, 3].map(i => {
@@ -256,6 +316,18 @@ export default class App extends React.Component {
 
     return (
       <div className="main">
+        <div className="actions">
+          <button onClick={this.start.bind(this)}>Start</button>
+          <button
+            onClick={() => {
+              this.logs = [];
+              this.setState({ logs: [] });
+            }}
+          >
+            Clear
+          </button>
+          <Logs logs={logs} />
+        </div>
         <div className="simulator">
           <User zone={userActiveZone} active={videoPlaying} />
           <div className="zones">{zones}</div>
