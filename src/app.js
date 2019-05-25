@@ -1,8 +1,9 @@
 import React from 'react';
 import cx from 'classnames';
-import { runSaga, stdChannel, END } from 'redux-saga';
-import { delay, call, cancelled, take, race, fork, put, cancel } from 'redux-saga/effects';
-import EventEmitter from 'events';
+import io from 'socket.io-client';
+import { createEventBus } from '../event-bus';
+
+const actions = require('../actions');
 
 /*
 - Датчик входа в Зону 1
@@ -17,121 +18,19 @@ import EventEmitter from 'events';
   - механизм, перемещающий мобильную стойку между тремя конечными положениями
  */
 
-const actions = {
-  INIT: 'INIT',
-  SENSOR_TRIGGER: 'SENSOR_TRIGGER',
-  ZONE_ACTIVATED: 'ZONE_ACTIVATED',
-  ZONE_ACTIVATION_WARNING: 'ZONE_ACTIVATION_WARNING',
-  // TV_STAND_MOVE_TO: 'TV_STAND_MOVE_TO',
-  TV_STAND_MOVE_FINISHED: 'TV_STAND_MOVE_FINISHED',
-  VIDEO_START: 'VIDEO_START',
-  VIDEO_FINISHED: 'VIDEO_FINISHED',
-  ZONE_FINISHED: 'ZONE_FINISHED',
-  FINISH: 'FINISH',
-};
+const socket = io.connect('http://localhost:5000');
+const { emitter, dispatch } = createEventBus('client');
 
-const emitter = new EventEmitter();
-const state = {};
+socket.on('action', action => {
+  console.log('SOCKET', action);
+  dispatch(action);
+});
 
-const dispatch = event => emitter.emit('action', event);
-
-const createSagaIO = (emitter, getStateResolve) => {
-  const channel = stdChannel();
-  emitter.on('action', channel.put);
-
-  return {
-    channel,
-    dispatch,
-    getState: () => state,
-  };
-};
-
-// const sagaIO = createSagaIO(emitter, () => state);
-
-const matchSensor = number => {
-  return action => action.type === actions.SENSOR_TRIGGER && action.sensorNumber === number;
-};
-
-function* activateZone(zoneNumber) {
-  for (let retries = 0; retries <= 1; retries++) {
-    const [sensorTriggered, timeout] = yield race([take(matchSensor(zoneNumber)), delay(5000)]);
-
-    if (sensorTriggered) {
-      return true;
-    }
-
-    if (timeout) {
-      yield put({ type: actions.ZONE_ACTIVATION_WARNING, zoneNumber });
-    }
+emitter.on('action', action => {
+  if (action.source !== 'server') {
+    socket.emit('action', action);
   }
-
-  yield put(END);
-
-  return false;
-}
-
-function* zone1Task() {
-  yield take(matchSensor(1));
-  yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 1 });
-  yield take(actions.TV_STAND_MOVE_FINISHED);
-  yield put({ type: actions.VIDEO_START });
-  yield take(actions.VIDEO_FINISHED);
-  yield put({ type: actions.ZONE_FINISHED, zoneNumber: 1 });
-}
-
-function* zone2Task() {
-  const activated = yield call(activateZone, 2);
-
-  if (!activated) {
-    return;
-  }
-
-  yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 2 });
-  yield take(actions.TV_STAND_MOVE_FINISHED);
-  yield put({ type: actions.VIDEO_START });
-  yield take(actions.VIDEO_FINISHED);
-  yield put({ type: actions.ZONE_FINISHED, zoneNumber: 2 });
-}
-
-function* zone3Task() {
-  const activated = yield call(activateZone, 3);
-
-  if (!activated) {
-    return;
-  }
-
-  yield put({ type: actions.ZONE_ACTIVATED, zoneNumber: 3 });
-  yield take(actions.TV_STAND_MOVE_FINISHED);
-  yield put({ type: actions.VIDEO_START });
-  yield take(actions.VIDEO_FINISHED);
-  yield put({ type: actions.ZONE_FINISHED, zoneNumber: 3 });
-}
-
-function* simulatorSaga() {
-  try {
-    while (true) {
-      yield put({ type: actions.INIT });
-      yield fork(zone1Task);
-      yield take(actions.ZONE_FINISHED);
-
-      yield fork(zone2Task);
-      yield take(actions.ZONE_FINISHED);
-
-      yield fork(zone3Task);
-      yield take(actions.ZONE_FINISHED);
-
-      yield put({ type: actions.FINISH });
-
-      // const [zone1Finished, zone1Interrupted] = yield race([
-      //   take(actions.ZONE_FINISHED),
-      //   take(actions.SENSOR_TRIGGER),
-      // ]);
-    }
-  } finally {
-    if (yield cancelled()) {
-    }
-  }
-}
+});
 
 const Zone = ({ number, label, active, isMeta, isFinished, onClick, onRender }) => {
   let zoneRef;
@@ -188,10 +87,10 @@ const TvStand = ({ zone, time, onMoveFinished }) => {
 const Logs = ({ logs = [] }) => {
   return (
     <div className="logs">
-      {logs.map(({ type, ...rest }, i) => (
+      {logs.map(({ type, payload }, i) => (
         <div key={i} className="log-entry">
           <div>{type}</div>
-          <div>{Object.keys(rest).length > 0 && JSON.stringify(rest)}</div>
+          <div>{payload && JSON.stringify(payload)}</div>
         </div>
       ))}
     </div>
@@ -223,14 +122,14 @@ export default class App extends React.Component {
           });
           break;
         case actions.ZONE_ACTIVATED:
-          this.setState({
-            userActiveZoneNumber: action.zoneNumber,
-            tvStandActiveZoneNumber: action.zoneNumber,
-          });
-
-          if (this.state.tvStandActiveZoneNumber === action.zoneNumber) {
-            dispatch({ type: actions.TV_STAND_MOVE_FINISHED });
+          if (this.state.tvStandActiveZoneNumber === action.payload.zoneNumber) {
+            dispatch(actions.TV_STAND_MOVE_FINISHED);
           }
+
+          this.setState({
+            userActiveZoneNumber: action.payload.zoneNumber,
+            tvStandActiveZoneNumber: action.payload.zoneNumber,
+          });
 
           break;
         case actions.VIDEO_START:
@@ -238,7 +137,7 @@ export default class App extends React.Component {
 
           videoTickTimer = setInterval(() => {
             if (this.state.videoTimeTick >= 5) {
-              dispatch({ type: actions.VIDEO_FINISHED });
+              dispatch(actions.VIDEO_FINISHED);
               this.setState({ videoTimeTick: 0, videoPlaying: false });
               clearInterval(videoTickTimer);
               return;
@@ -251,7 +150,7 @@ export default class App extends React.Component {
           this.setState({
             finishedZones: {
               ...this.state.finishedZones,
-              [action.zoneNumber]: true,
+              [action.payload.zoneNumber]: true,
             },
           });
           break;
@@ -260,11 +159,11 @@ export default class App extends React.Component {
   }
 
   onSensorTrigger(sensorNumber) {
-    dispatch({ type: actions.SENSOR_TRIGGER, sensorNumber });
+    dispatch(actions.SENSOR_TRIGGER, { sensorNumber });
   }
 
   onTvStandMoveFinished(zone) {
-    dispatch({ type: actions.TV_STAND_MOVE_FINISHED });
+    dispatch(actions.TV_STAND_MOVE_FINISHED);
   }
 
   saveZone(zone) {
@@ -276,8 +175,7 @@ export default class App extends React.Component {
   }
 
   start() {
-    dispatch(END);
-    runSaga(createSagaIO(emitter, () => state), simulatorSaga);
+    dispatch(actions.START);
   }
 
   render() {

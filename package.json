@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "start": "webpack-dev-server --hot --port 3000",
+    "start": "concurrently \"nodemon server.js\" \"webpack-dev-server --hot --port 3000\"",
     "build": "webpack",
     "lint": "eslint src"
   },
@@ -43,13 +43,18 @@
   "dependencies": {
     "@serialport/parser-readline": "^2.0.2",
     "classnames": "^2.2.6",
+    "concurrently": "^4.1.0",
     "events": "^3.0.0",
+    "express": "^4.17.0",
     "mobx": "^5.9.4",
     "mobx-react": "^5.4.3",
     "mobx-react-devtools": "^6.1.1",
+    "nodemon": "^1.19.0",
     "react": "^16.8.6",
     "react-dom": "^16.8.6",
     "redux-saga": "^1.0.2",
-    "serialport": "^7.1.5"
+    "serialport": "^7.1.5",
+    "socket.io": "^2.2.0",
+    "socket.io-client": "^2.2.0"
   }
 }
